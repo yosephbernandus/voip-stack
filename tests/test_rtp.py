@@ -357,3 +357,43 @@ def test_known_byte_vector_build_matches() -> None:
     serialised = build_rtp(packet)
     assert serialised[:12] == expected_header_bytes
     assert serialised[12:] == payload
+
+
+# ---------------------------------------------------------------------------
+# Unsupported header fields fail explicitly rather than corrupting the payload
+# ---------------------------------------------------------------------------
+
+def test_parse_rejects_padding() -> None:
+    """P=1 would leave the padding length byte in the payload, so parse_rtp
+    refuses it rather than returning a wrong payload."""
+    # byte0: V=2, P=1, X=0, CC=0 => 0xA0
+    data = struct.pack("!BBHII", 0xA0, 0x00, 1, 160, 999) + b"payload\x01"
+    with pytest.raises(ValueError, match="padding"):
+        parse_rtp(data)
+
+
+def test_parse_rejects_extension() -> None:
+    """X=1 puts an extension header before the payload, which this parser does
+    not skip, so parse_rtp refuses it rather than mislabeling the boundary."""
+    # byte0: V=2, P=0, X=1, CC=0 => 0x90
+    data = struct.pack("!BBHII", 0x90, 0x00, 1, 160, 999) + b"\x00\x00\x00\x01payload"
+    with pytest.raises(ValueError, match="extension"):
+        parse_rtp(data)
+
+
+def test_build_rejects_padding() -> None:
+    """build_rtp cannot emit padding bytes, so it refuses a padded packet."""
+    with pytest.raises(ValueError, match="padding"):
+        build_rtp(make_packet(padding=True, payload=b"x"))
+
+
+def test_build_rejects_extension() -> None:
+    """build_rtp cannot emit an extension header, so it refuses one."""
+    with pytest.raises(ValueError, match="extension"):
+        build_rtp(make_packet(extension=True, payload=b"x"))
+
+
+def test_build_rejects_csrc() -> None:
+    """build_rtp cannot emit a CSRC list, so it refuses csrc_count > 0."""
+    with pytest.raises(ValueError, match="csrc"):
+        build_rtp(make_packet(csrc_count=2, payload=b"x"))

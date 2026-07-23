@@ -261,6 +261,12 @@ class SignalingServer:
                     await self._send_error(websocket, 400, "invalid JSON")
                     continue
 
+                # A JSON array, string, or number is valid JSON but not a
+                # message. Reject it before calling dict methods on it.
+                if not isinstance(msg, dict):
+                    await self._send_error(websocket, 400, "message must be a JSON object")
+                    continue
+
                 msg_type = msg.get("type")
 
                 if msg_type == "register":
@@ -268,6 +274,19 @@ class SignalingServer:
                     if not new_username:
                         await self._send_error(websocket, 400, "username required")
                         continue
+                    # Refuse a name already held by a different live connection,
+                    # so one client cannot hijack another's registration.
+                    existing = self._connections.get(new_username)
+                    if existing is not None and existing is not websocket:
+                        await self._send_error(
+                            websocket, 409, "username already registered"
+                        )
+                        continue
+                    # If this connection was registered under another name, drop
+                    # that stale mapping before taking the new one.
+                    if username is not None and username != new_username:
+                        if self._connections.get(username) is websocket:
+                            del self._connections[username]
                     username = new_username
                     await self._handle_register(username, websocket)
 
@@ -293,7 +312,10 @@ class SignalingServer:
             # Normal path: the remote end closed the connection
             pass
         finally:
-            if username:
+            # Only remove the mapping if it still points at this connection. A
+            # later connection may have registered the same name, and it must
+            # not be evicted when this one closes.
+            if username and self._connections.get(username) is websocket:
                 del self._connections[username]
                 logger.info("[SIGNALING] %s disconnected", username)
 
@@ -325,7 +347,8 @@ class SignalingServer:
         presence and obtains a list of other reachable users. Broadcasts
         user_online to all currently registered peers.
         """
-        # Store connection (re-registration replaces previous entry)
+        # The dispatch loop has already verified the name is free or held by
+        # this same connection, so storing it here cannot hijack another user.
         self._connections[username] = websocket
 
         others = [u for u in self._connections if u != username]

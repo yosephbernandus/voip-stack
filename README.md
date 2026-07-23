@@ -1,28 +1,48 @@
 # voip-stack
 
-A working VoIP stack built from scratch in Python. It parses SIP, negotiates
-codecs with SDP, frames audio into RTP, smooths arrival timing with a jitter
-buffer, and ships a browser client so you can place a real call between two
-tabs.
+An educational Python protocol lab for SIP, SDP, RTP, and jitter buffering,
+with a runnable browser-to-browser WebRTC demo and a Python signaling server.
 
-The point is understanding, not production. Every protocol layer is written by
-hand against its RFC so you can read exactly what crosses the wire, byte by
-byte. Pydantic models describe each structure and validate it at parse time, so
-the type definitions double as the specification.
+Each protocol layer is written by hand against its RFC so you can read exactly
+what the format looks like, byte by byte. Pydantic models describe every
+structure and validate it at parse time, so the type definitions double as the
+specification. The point is understanding, not production.
 
-## What is and is not from scratch
+## What actually runs, and what is here to read
 
-The SIP, SDP, RTP, and jitter buffer code is all original, standard library
-plus Pydantic, no VoIP libraries. The one exception is the WebSocket transport,
-which uses the `websockets` library. A browser cannot open a raw TCP or UDP
-socket, so WebSocket is the only way to reach it, and WebSocket is plumbing
-rather than VoIP. Keeping the transport off the shelf lets the from-scratch
-effort go where it matters.
+Being precise about this matters, because it is easy to overclaim.
 
-Media is carried by the browser. The signaling plane (register, invite,
-answer, ICE, bye) runs through the Python server. The voice itself flows
-directly between browsers over UDP through WebRTC, exactly as it does in
-production, where the signaling plane and the media plane are also separate.
+**The live call uses three things:**
+
+- **Signaling:** JSON over WebSocket, routed by the Python server in
+  `voip/server.py`. Each message type maps one to one onto a SIP concept
+  (register, invite, answer, ICE, bye).
+- **Media:** encrypted SRTP, set up and carried by the browser's WebRTC stack.
+  It flows directly between browsers when it can, and through a TURN relay when
+  it cannot, which may include TCP or TLS. The Python server never touches
+  audio.
+- **The browser client** in `client/index.html`, which drives WebRTC and the UI.
+
+**The protocol modules are standalone learning implementations.** `sip.py`,
+`sdp.py` (beyond its `log_sdp` helper), `rtp.py`, `jitter.py`, and `audio.py`
+are hand-written parsers and builders with their own test suites. They show how
+each format works at the byte level. They are not on the live media path, since
+the browser's WebRTC stack handles real SIP-style negotiation, RTP, and
+playout. Read them to understand the protocols, not because the running call
+imports them.
+
+This split mirrors production, where the signaling plane and the media plane
+are separate systems. Here the signaling plane is Python and the media plane is
+WebRTC.
+
+## The one dependency that is not from scratch
+
+Everything in the protocol modules is standard library plus Pydantic, no VoIP
+libraries. The single exception is the WebSocket transport, which uses the
+`websockets` library. A browser cannot open a raw TCP or UDP socket, so
+WebSocket is the only way to reach it, and WebSocket is plumbing rather than
+VoIP. Keeping the transport off the shelf lets the from-scratch effort go where
+it matters.
 
 ## Requirements
 
@@ -78,12 +98,17 @@ Wireshark captures, malformed input, and boundary conditions.
        |<-- answer + SDP answer -----|<-- answer + SDP answer ------|
        |--- ICE candidates --------->|--- ICE candidates ---------->|
        |                             |                              |
-       |============ RTP audio, directly over UDP, WebRTC ==========|
+       |===== encrypted SRTP over WebRTC, direct or via a TURN =====|
+       |=====        relay, never through the Python server    =====|
 ```
 
-The server is a rendezvous point. It routes JSON messages by name and never
-touches the audio. Each JSON message type maps one to one onto a SIP concept,
-which keeps the routing readable while staying faithful to the protocol.
+Two planes, kept separate:
+
+- **Signaling:** JSON over WebSocket, routed by Python. Each message type maps
+  one to one onto a SIP concept, which keeps the routing readable.
+- **Media:** encrypted SRTP negotiated and carried by WebRTC. The path is
+  chosen by ICE and can be direct or relayed through TURN. The Python server is
+  a rendezvous point for signaling and never touches the audio.
 
 ## Layout
 
@@ -123,6 +148,27 @@ environment. The server mints short-lived credentials per session and delivers
 them to the client inside the registration reply. Nothing is baked into the
 image or committed to the repo. Without these, the stack runs on STUN alone,
 which is enough for two tabs on the same machine or the same network.
+
+## Scope and security boundary
+
+This is a learning project, and the signaling server is deliberately minimal.
+If you deploy it somewhere public, know what it does not do:
+
+- **No identity or authentication.** Anyone can register any free name. There
+  is no login, no token, and no proof of who a caller is.
+- **No authorization on call messages.** The server routes answer, bye, and
+  reject by the names in the message. It does not verify that the sender is a
+  participant in that call.
+- **No rate limiting.** A visitor can register repeatedly. If TURN credentials
+  are configured, each registration mints a fresh set, so an open deployment
+  could run up relay cost. The long-lived API token stays server side and is
+  never exposed, but the minting itself is unthrottled.
+- **No horizontal scaling.** The user registry and call state live in process
+  memory, so the server runs as a single instance. Two replicas would split
+  users across processes and calls between them would fail.
+
+None of this matters for a local demo or a controlled environment. It does
+matter before putting the server on the open internet.
 
 ## License
 

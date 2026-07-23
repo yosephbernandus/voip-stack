@@ -122,78 +122,11 @@ def test_mix_negative_samples():
 
 def test_mix_odd_length_raises():
     """Multi-stream input whose length is not a whole number of 16-bit samples
-    raises ValueError rather than silently truncating the trailing byte.
-
-    This guards the Python/Rust parity contract: the Rust implementation
-    (rust/src/audio.rs) rejects non-multiple-of-2 lengths, so the pure-Python
-    fallback must do the same, otherwise the "drop-in replacement" is a lie.
-    """
+    raises ValueError rather than silently truncating the trailing byte."""
     odd_a = _samples_to_bytes([100, 200]) + b'\x01'  # 5 bytes, not a whole sample
     odd_b = _samples_to_bytes([10, 20]) + b'\x02'
     with pytest.raises(ValueError):
         mix_streams([odd_a, odd_b])
-
-
-# ---------------------------------------------------------------------------
-# Python ↔ Rust parity
-#
-# These tests run only when the compiled Rust extension (voip._rust) is
-# present. They assert the Rust mix_streams produces byte-identical output to
-# a reference pure-Python saturating mixer across the same vectors, and that
-# both reject odd-length input. This is the safety net behind the talk's
-# "Rust is a drop-in replacement, just faster" claim.
-# ---------------------------------------------------------------------------
-
-
-def _reference_mix(streams: list[bytes], width: int = 2) -> bytes:
-    """Canonical pure-Python saturating mixer used as the parity oracle."""
-    if not streams:
-        return b''
-    if len(streams) == 1:
-        return streams[0]
-    first = len(streams[0])
-    for stream in streams[1:]:
-        if len(stream) != first:
-            raise ValueError('streams must have equal length')
-    if first % width != 0:
-        raise ValueError('stream length must be a multiple of width')
-    out: list[bytes] = []
-    for i in range(first // width):
-        offset = i * width
-        total = sum(struct.unpack_from('<h', s, offset)[0] for s in streams)
-        total = max(-32768, min(32767, total))
-        out.append(struct.pack('<h', total))
-    return b''.join(out)
-
-
-def test_rust_matches_python_reference():
-    """Rust mix_streams is byte-identical to the pure-Python reference."""
-    rust = pytest.importorskip('voip._rust')
-
-    vectors = [
-        [],
-        [_samples_to_bytes([100, -200, 300, -400])],
-        [_samples_to_bytes([100, 200, 300]), _samples_to_bytes([10, 20, 30])],
-        [_samples_to_bytes([32767, 32767]), _samples_to_bytes([32767, 1])],
-        [_samples_to_bytes([-32768, -32768]), _samples_to_bytes([-32768, -1])],
-        [_samples_to_bytes([1000, 2000])] * 3,
-    ]
-    for streams in vectors:
-        assert rust.mix_streams(streams) == _reference_mix(streams)
-
-
-def test_rust_and_python_both_reject_odd_length():
-    """Rust and the active Python mixer both raise on non-multiple-of-2 length."""
-    rust = pytest.importorskip('voip._rust')
-
-    odd = [
-        _samples_to_bytes([100, 200]) + b'\x01',
-        _samples_to_bytes([10, 20]) + b'\x02',
-    ]
-    with pytest.raises(ValueError):
-        rust.mix_streams(odd)
-    with pytest.raises(ValueError):
-        mix_streams(odd)
 
 
 # ---------------------------------------------------------------------------

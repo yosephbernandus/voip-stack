@@ -111,24 +111,45 @@ def test_reordering() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_gap_detection() -> None:
-    """When packet 2 is missing, get() returns 1 then None (waiting for 2)."""
+def test_gap_skipped_after_deadline() -> None:
+    """A missing packet is declared lost once a later packet is ready to play,
+    so a single loss never stalls the stream."""
     buffer = _make_buffer(target_delay_ms=0)
 
     buffer.put(_make_packet(1))
     buffer.put(_make_packet(3))  # gap at 2
 
     assert buffer.get().header.sequence_number == 1  # type: ignore[union-attr]
-    # Now waiting for sequence 2 which has not arrived
-    assert buffer.get() is None
-    # Packet 3 is also not returned until 2 is resolved
-    assert buffer.get() is None
-
-    # Put the missing packet; now 2 and 3 should be releasable
-    buffer.put(_make_packet(2))
-    assert buffer.get().header.sequence_number == 2  # type: ignore[union-attr]
+    # Packet 2 never arrived. With the playout deadline already met (delay=0),
+    # the buffer skips the gap and releases 3 rather than waiting forever.
     assert buffer.get().header.sequence_number == 3  # type: ignore[union-attr]
     assert buffer.get() is None
+    # The skipped sequence number is counted as lost exactly once.
+    assert buffer.stats().packets_lost == 1
+
+
+def test_reordered_packet_recovered_within_deadline(monkeypatch) -> None:
+    """A packet that arrives late but before the playout deadline is delivered
+    in order, not skipped."""
+    clock = {"t": 1000.0}
+    monkeypatch.setattr("voip.jitter.time.monotonic", lambda: clock["t"])
+
+    buffer = _make_buffer(target_delay_ms=50)
+
+    buffer.put(_make_packet(1))          # arrives at t=1000
+    clock["t"] = 1000.060                # 60 ms later, past the 50 ms delay
+    assert buffer.get().header.sequence_number == 1  # type: ignore[union-attr]
+
+    buffer.put(_make_packet(3))          # gap at 2, arrives at t=1000.060
+    # Packet 2 is missing but packet 3 has not yet waited the full 50 ms, so the
+    # buffer holds instead of skipping.
+    assert buffer.get() is None
+
+    buffer.put(_make_packet(2))          # the missing packet arrives in time
+    clock["t"] = 1000.120                # advance so both meet the delay
+    assert buffer.get().header.sequence_number == 2  # type: ignore[union-attr]
+    assert buffer.get().header.sequence_number == 3  # type: ignore[union-attr]
+    assert buffer.stats().packets_lost == 0
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +201,8 @@ def test_late_packet_not_buffered() -> None:
 
 
 def test_buffer_overflow_evicts_oldest() -> None:
-    """When the buffer is full, the oldest packet is evicted and counted as lost."""
+    """When the buffer is full, the oldest packet is evicted. The loss is
+    recorded later, when playout skips the missing sequence number."""
     max_size = 3
     buffer = _make_buffer(target_delay_ms=0, max_buffer_size=max_size)
 
@@ -192,16 +214,16 @@ def test_buffer_overflow_evicts_oldest() -> None:
     # Add one more, should evict sequence 1 (the oldest)
     buffer.put(_make_packet(4))
 
-    stats = buffer.stats()
-    assert stats.packets_lost == 1
+    # Eviction itself is not counted as loss; the buffer now holds 2, 3, 4.
+    assert buffer.stats().packets_lost == 0
 
-    # Sequence 1 was evicted; next_expected is still 1, so get() returns None
-    # (packet 1 is gone and cannot be recovered)
-    assert buffer.get() is None
+    # Playout skips the evicted sequence 1 and releases 2, counting 1 as lost.
+    assert buffer.get().header.sequence_number == 2  # type: ignore[union-attr]
+    assert buffer.stats().packets_lost == 1
 
 
 def test_buffer_overflow_multiple_evictions() -> None:
-    """Each overflow adds one to packets_lost."""
+    """Two evictions leave a two-packet gap, counted once playout skips it."""
     buffer = _make_buffer(target_delay_ms=0, max_buffer_size=2)
 
     buffer.put(_make_packet(1))
@@ -209,6 +231,11 @@ def test_buffer_overflow_multiple_evictions() -> None:
     buffer.put(_make_packet(3))  # evicts 1
     buffer.put(_make_packet(4))  # evicts 2
 
+    # Nothing counted yet: eviction is silent until playout reaches the gap.
+    assert buffer.stats().packets_lost == 0
+
+    # Playout skips the evicted 1 and 2, releasing 3, and counts both as lost.
+    assert buffer.get().header.sequence_number == 3  # type: ignore[union-attr]
     assert buffer.stats().packets_lost == 2
 
 
@@ -254,56 +281,29 @@ def test_duplicate_packet_stats_unchanged() -> None:
 
 def test_stats_accuracy() -> None:
     """Verify packets_received, packets_lost, and packets_late after mixed ops."""
-    # Use a buffer large enough to hold 3 packets; overflow on the 4th
+    # Buffer large enough to hold 3 packets; overflow on the 4th.
     buffer = _make_buffer(target_delay_ms=0, max_buffer_size=3)
 
-    # Fill the buffer with sequences 10, 11, 12
+    # Fill with 10, 11, 12, then 13 evicts the oldest (10). Buffer holds 11-13.
     buffer.put(_make_packet(10))
     buffer.put(_make_packet(11))
     buffer.put(_make_packet(12))
-
-    # Adding packet 13 evicts oldest (10) -> packets_lost = 1
     buffer.put(_make_packet(13))
 
-    # next_expected is 10 (first seen), which is now gone, get() returns None
+    # Playout skips the evicted 10 (counted lost), then releases 11, 12, 13.
+    assert buffer.get().header.sequence_number == 11  # type: ignore[union-attr]
+    assert buffer.get().header.sequence_number == 12  # type: ignore[union-attr]
+    assert buffer.get().header.sequence_number == 13  # type: ignore[union-attr]
     assert buffer.get() is None
 
-    # Consume all remaining: 11, 12, 13 are in the buffer
-    # But get() is blocked on seq 10.  We need to manually feed 10 back.
-    # Re-inserting 10: buffer currently holds {11, 12, 13} (size 3, full).
-    # Inserting 10 evicts oldest of {11,12,13} = 11 -> packets_lost = 2.
-    buffer.put(_make_packet(10))
-
-    # Now buffer holds {10, 12, 13}; get() returns 10, then blocks on 11
-    result = buffer.get()
-    assert result is not None
-    assert result.header.sequence_number == 10
-
-    # Packet 11 is missing; get() returns None
-    assert buffer.get() is None
-
-    # Restore 11 so we can continue
-    buffer.put(_make_packet(11))
-    result = buffer.get()
-    assert result is not None
-    assert result.header.sequence_number == 11
-
-    result = buffer.get()
-    assert result is not None
-    assert result.header.sequence_number == 12
-
-    result = buffer.get()
-    assert result is not None
-    assert result.header.sequence_number == 13
-
-    # Now playout is past 13; next_expected = 14
-    # Insert a late packet (before 14 in modular sense)
-    buffer.put(_make_packet(9))  # 9 < 14 -> late
+    # Playout is now past 13, so next_expected is 14. A packet before that in
+    # modular order is late.
+    buffer.put(_make_packet(9))
 
     stats = buffer.stats()
-    assert stats.packets_received == 4   # 10, 11, 12, 13
-    assert stats.packets_lost == 2       # 10 evicted first, then 11
-    assert stats.packets_late == 1       # packet 9 after playout reached 14
+    assert stats.packets_received == 3   # 11, 12, 13
+    assert stats.packets_lost == 1       # 10 was evicted and then skipped
+    assert stats.packets_late == 1       # 9 arrived after playout reached 14
 
 
 # ---------------------------------------------------------------------------

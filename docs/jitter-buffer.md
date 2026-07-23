@@ -95,15 +95,15 @@ Humans tolerate up to ~150ms of one-way delay before conversations feel awkward 
 The algorithm is simple:
 
 **put(packet):**
-1. If the buffer is full, drop the oldest packet and increment `packets_lost`
+1. If the buffer is full, drop the oldest packet to make room. This is not counted as loss here. The gap it leaves is counted later, when `get()` skips over it, so a packet is never counted twice
 2. If the packet's sequence number is older than `next_expected_sequence`, it's too late, increment `packets_late` and drop it
 3. Otherwise, insert the packet into its sorted position by `sequence_number`
 
 **get():**
-1. Check if `target_delay_ms` has elapsed since the earliest packet's arrival
-2. If the packet at the head of the buffer has the expected sequence number, pop and return it, advance `next_expected_sequence`
-3. If the expected sequence number is missing but a later one is present, increment `packets_lost`, advance `next_expected_sequence`, and return the next available packet
-4. If the buffer is empty or nothing is playable yet, return `None`
+1. If the expected packet is present and has been held for `target_delay_ms`, pop and return it, and advance `next_expected_sequence`
+2. If the expected packet is missing, wait for it, but only until a later packet has itself waited `target_delay_ms`. That playout deadline is what keeps one lost packet from stalling the stream forever
+3. Once the deadline passes with the expected packet still missing, declare the gap lost (add it to `packets_lost`), advance `next_expected_sequence` over it, and return the earliest packet that did arrive
+4. If nothing is playable yet, return `None`
 
 **stats():**
 Returns a `BufferStats` with counters: packets_received, packets_lost, packets_late, current_delay_ms.

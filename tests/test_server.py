@@ -434,3 +434,62 @@ def test_unknown_message_type():
                 assert "ping_unknown" in error["message"]
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Robustness: malformed messages and duplicate registration
+# ---------------------------------------------------------------------------
+
+def test_non_object_json_rejected():
+    """A JSON array is valid JSON but not a message, so it is rejected with 400
+    rather than crashing the connection handler."""
+
+    async def _run():
+        async with server_fixture() as srv:
+            url = f"ws://127.0.0.1:{srv.port}"
+            async with connect(url) as ws:
+                await ws.send(json.dumps([1, 2, 3]))
+                response = await recv_json(ws)
+                assert response["type"] == "error"
+                assert response["code"] == 400
+                # The connection stays usable after the error.
+                registered = await register(ws, "alice")
+                assert registered["type"] == "registered"
+
+    asyncio.run(_run())
+
+
+def test_duplicate_username_rejected():
+    """A name held by a live connection cannot be taken over by another."""
+
+    async def _run():
+        async with server_fixture() as srv:
+            url = f"ws://127.0.0.1:{srv.port}"
+            async with connect(url) as first_ws, connect(url) as second_ws:
+                assert (await register(first_ws, "alice"))["type"] == "registered"
+
+                await send_json(second_ws, {"type": "register", "username": "alice"})
+                response = await recv_json(second_ws)
+                assert response["type"] == "error"
+                assert response["code"] == 409
+
+    asyncio.run(_run())
+
+
+def test_original_connection_survives_duplicate_attempt():
+    """When a duplicate registration is refused, the original connection keeps
+    its name and can still place calls."""
+
+    async def _run():
+        async with server_fixture() as srv:
+            url = f"ws://127.0.0.1:{srv.port}"
+            async with connect(url) as first_ws, connect(url) as second_ws:
+                await register(first_ws, "alice")
+                await send_json(second_ws, {"type": "register", "username": "alice"})
+                await recv_json(second_ws)  # 409 error
+
+                # Register a real second user and confirm alice is still online.
+                resp = await register(second_ws, "bob")
+                assert "alice" in resp["users"]
+
+    asyncio.run(_run())

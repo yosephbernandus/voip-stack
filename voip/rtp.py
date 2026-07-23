@@ -106,13 +106,31 @@ def parse_rtp(data: bytes) -> RtpPacket:
     """
     Decode a complete UDP payload into an RtpPacket per RFC 3550 Section 5.1.
 
-    The payload bytes begin immediately after the variable-length header
-    (fixed 12 bytes + 4 × CC bytes for any CSRC list entries).
+    Supported subset:
+      - The fixed 12-byte header.
+      - A CSRC list (CC > 0). The payload offset is computed correctly, so the
+        payload is extracted intact. The CSRC identifiers themselves are not
+        stored on RtpHeader, which is enough for a two-party call where there
+        are no contributing sources.
+
+    Not supported, and rejected rather than silently mishandled:
+      - Padding (P = 1). The trailing padding length byte would otherwise be
+        left in the payload.
+      - Header extensions (X = 1). The extension header sits between the CSRC
+        list and the payload, and this parser does not skip it, so the payload
+        boundary would be wrong.
 
     Raises:
-        ValueError: propagated from parse_rtp_header for invalid data.
+        ValueError: for data shorter than 12 bytes, a version other than 2, a
+            truncated CSRC list, or a packet with padding or an extension set.
     """
     header, header_length = parse_rtp_header(data)
+
+    if header.padding:
+        raise ValueError("RTP padding (P=1) is not supported by this parser")
+    if header.extension:
+        raise ValueError("RTP header extension (X=1) is not supported by this parser")
+
     payload = data[header_length:]
     return RtpPacket(header=header, payload=payload)
 
@@ -121,10 +139,25 @@ def build_rtp(packet: RtpPacket) -> bytes:
     """
     Serialise an RtpPacket to a big-endian byte string per RFC 3550 Section 5.1.
 
-    The result is suitable for writing directly to a UDP socket.  CSRC list
-    entries and header extensions are not emitted (not tracked in RtpHeader).
+    This emits the fixed 12-byte header followed by the payload. It does not
+    emit padding, header extensions, or a CSRC list, none of which are carried
+    on RtpHeader. A packet whose header sets any of those flags is rejected
+    rather than serialised into bytes that claim structures they do not include.
+
+    Raises:
+        ValueError: if the header has padding, an extension, or csrc_count > 0.
     """
     header = packet.header
+
+    if header.padding:
+        raise ValueError("cannot build an RTP packet with padding (P=1) set")
+    if header.extension:
+        raise ValueError("cannot build an RTP packet with an extension (X=1) set")
+    if header.csrc_count > 0:
+        raise ValueError(
+            "cannot build an RTP packet with csrc_count > 0: the CSRC list is "
+            "not carried on RtpHeader"
+        )
 
     # Reconstruct the two flag bytes from individual header fields.
     # byte0: V V P X CC CC CC CC

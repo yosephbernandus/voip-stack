@@ -6,8 +6,9 @@ configurable delay before forwarding them in sequence order.  This trades
 latency for smoothness: the decoder always receives packets in order, at the
 cost of target_delay_ms of extra mouth-to-ear delay.
 
-RFC 3550 §A.1 discusses sequence number handling.  RFC 3550 §6.4.1 describes
-the RTCP Receiver Report fields that BufferStats maps onto.
+RFC 3550 §A.1 discusses sequence number handling. RFC 3550 §6.4.1 describes
+the RTCP Receiver Report, which is where the received and lost counters would
+feed if this buffer were wired to full RTCP reporting.
 """
 
 from __future__ import annotations
@@ -76,8 +77,10 @@ class JitterBuffer:
         """Insert a received packet into the buffer.
 
         If the buffer is full (max_buffer_size reached), the oldest packet
-        (lowest sequence number, accounting for wraparound) is evicted and
-        counted as lost to make room for the new arrival.
+        (lowest sequence number, accounting for wraparound) is evicted to make
+        room for the new arrival. The eviction is not counted as loss here.
+        Loss is counted once, at playout, when get() skips a sequence number
+        that never gets released. Counting it in both places would double count.
 
         Packets arriving with a sequence number already behind the current
         playout position are counted as late and not buffered. Forwarding
@@ -115,65 +118,88 @@ class JitterBuffer:
         if sequence_number in self._buffer:
             return
 
-        # Evict the oldest (smallest sequence number) packet if buffer is full
+        # Evict the oldest (smallest sequence number) packet if the buffer is
+        # full. The gap it leaves is accounted for later, when get() skips it.
         if len(self._buffer) >= self._config.max_buffer_size:
             oldest_sequence_number = self._find_oldest_sequence_number()
             del self._buffer[oldest_sequence_number]
-            self._packets_lost += 1
 
         self._buffer[sequence_number] = (packet, time.monotonic())
 
     def get(self) -> RtpPacket | None:
-        """Return the next packet in sequence order if the playout delay is satisfied.
+        """Return the next packet for playout, or None if none is ready yet.
 
-        The caller should invoke get() once per packet interval (e.g. every
-        20 ms for G.711).  Returns None if the expected packet has not arrived
-        yet, or if it has arrived but has not been held for target_delay_ms.
+        Call get() once per packet interval (every 20 ms for G.711). The buffer
+        holds each packet for target_delay_ms before releasing it, which is what
+        absorbs jitter.
 
-        When None is returned the caller retains responsibility for gap
-        concealment (e.g. generating comfort noise) if it decides to advance
-        past the missing slot.  This buffer intentionally does not auto-skip
-        missing sequence numbers. That policy belongs in the server layer.
+        When the expected packet is missing, the buffer does not wait for it
+        forever. It applies a playout deadline: once the earliest packet already
+        buffered has itself waited the full target_delay_ms, the missing packet
+        is declared lost, the playout position skips forward over the gap, and
+        the earliest available packet is released. This is what keeps a single
+        lost packet from stalling the stream.
+
+        A return value of None means nothing is ready this tick. The caller may
+        generate comfort noise for that interval and call again on the next.
         """
         if self._next_expected_sequence is None:
             return None
 
+        now = time.monotonic()
         sequence_number = self._next_expected_sequence
 
-        if sequence_number not in self._buffer:
-            # Packet has not arrived yet; caller should wait or conceal
+        # Fast path: the expected packet is present. Release it once it has been
+        # held for the target delay.
+        if sequence_number in self._buffer:
+            _, insertion_time = self._buffer[sequence_number]
+            if (now - insertion_time) * 1000.0 < self._config.target_delay_ms:
+                return None
+            return self._release(sequence_number, now)
+
+        # The expected packet is missing. Wait for it only until a later packet
+        # has exceeded the playout deadline, at which point the missing packet
+        # is not going to arrive in time and the gap is declared lost.
+        if not self._buffer:
             return None
 
-        packet, insertion_time = self._buffer[sequence_number]
-
-        # Enforce target playout delay: do not release the packet too early
-        elapsed_ms = (time.monotonic() - insertion_time) * 1000.0
-        if elapsed_ms < self._config.target_delay_ms:
+        earliest = self._find_oldest_sequence_number()
+        _, insertion_time = self._buffer[earliest]
+        if (now - insertion_time) * 1000.0 < self._config.target_delay_ms:
             return None
 
-        # Release the packet and advance the playout position
-        del self._buffer[sequence_number]
+        # Skip forward over the missing sequence numbers, counting them as lost,
+        # then release the earliest packet that did arrive.
+        gap = (earliest - sequence_number) & 0xFFFF
+        self._packets_lost += gap
+        self._next_expected_sequence = earliest
+        return self._release(earliest, now)
+
+    def _release(self, sequence_number: int, now: float) -> RtpPacket:
+        """Release the buffered packet, advance playout, and update statistics."""
+        packet, insertion_time = self._buffer.pop(sequence_number)
         self._packets_received += 1
         self._playout_started = True
 
-        # Update exponentially weighted moving average of observed delay.
+        # Exponentially weighted moving average of observed buffering delay.
         # Alpha=0.125 is the same weight used for RTT in TCP (RFC 6298).
+        elapsed_ms = (now - insertion_time) * 1000.0
         alpha = 0.125
         self._current_delay_ms = (
             (1.0 - alpha) * self._current_delay_ms + alpha * elapsed_ms
         )
 
-        # Advance next_expected_sequence with 16-bit wraparound
+        # Advance the playout position with 16-bit wraparound.
         self._next_expected_sequence = (sequence_number + 1) & 0xFFFF
-
         return packet
 
     def stats(self) -> BufferStats:
         """Return a snapshot of cumulative buffer statistics.
 
-        The returned BufferStats maps directly onto RTCP Receiver Report block
-        fields (RFC 3550 §6.4.1), making it straightforward to populate RTCP
-        reports without a separate statistics object.
+        packets_received and packets_lost line up with the fields an RTCP
+        Receiver Report carries (RFC 3550 §6.4.1). packets_late and
+        current_delay_ms are buffer-local diagnostics, not RTCP fields, but they
+        are useful when reasoning about how the buffer is behaving.
         """
         return BufferStats(
             packets_received=self._packets_received,
