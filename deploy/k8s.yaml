@@ -28,7 +28,7 @@ spec:
         ports:
         - containerPort: 8080
         # NAT traversal. STUN alone is enough for direct peer-to-peer media.
-        # Phone-to-phone on isolated wifi or mobile data needs a TURN relay.
+        # Phone-to-phone on isolated wifi or mobile data may need a TURN relay.
         # When these credentials are present, the server mints short-lived
         # TURN credentials per registration and delivers them in the
         # "registered" reply. ICE_SERVERS is a static fallback for a TURN

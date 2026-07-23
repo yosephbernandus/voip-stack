@@ -61,11 +61,12 @@ class JitterBufferConfig(BaseModel):
 
 class BufferStats(BaseModel):
     """
-    Cumulative statistics for a JitterBuffer, suitable for RTCP-SR/RR reporting.
+    Cumulative statistics for a JitterBuffer.
 
-    These counters map directly onto the fields in an RTCP Receiver Report
-    block (RFC 3550 §6.4.1) so that the VoIP stack can report quality metrics
-    to the remote endpoint without maintaining a separate statistics object.
+    packets_received and packets_lost line up with the counters an RTCP
+    Receiver Report carries (RFC 3550 §6.4.1) and would feed straight into one.
+    packets_late and current_delay_ms are buffer-local diagnostics, not RTCP
+    fields, but they are useful for reasoning about how the buffer behaves.
     """
 
     # Total packets successfully forwarded to the decoder

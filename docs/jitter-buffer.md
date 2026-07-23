@@ -128,16 +128,16 @@ The 32768 (half of 65536) is the cutoff for determining which side of the wrapar
 
 ### Buffer Statistics
 
-Our `BufferStats` is designed to align with RTCP receiver report fields (RFC 3550 §6.4.1):
+`BufferStats` collects four counters (RFC 3550 §6.4.1 describes the related RTCP fields):
 
-| Field | Meaning |
-|-------|---------|
-| `packets_received` | Total packets successfully delivered to `get()` |
-| `packets_lost` | Gap count, packets that were never received |
-| `packets_late` | Packets dropped because they arrived after playout |
-| `current_delay_ms` | Current effective delay between receive and playout |
+| Field | Meaning | RTCP? |
+|-------|---------|-------|
+| `packets_received` | Total packets successfully delivered to `get()` | lines up with an RTCP Receiver Report counter |
+| `packets_lost` | Gap count, packets that were never delivered | lines up with an RTCP Receiver Report counter |
+| `packets_late` | Packets dropped because they arrived after playout | buffer-local diagnostic, not an RTCP field |
+| `current_delay_ms` | Effective delay between receive and playout | buffer-local diagnostic, not an RTCP field |
 
-These counters are exactly what an endpoint would include in an RTCP Receiver Report to tell the sender about network quality. We collect them for potential future RTCP implementation.
+`packets_received` and `packets_lost` would feed straight into an RTCP Receiver Report if this buffer were wired to full RTCP reporting. The other two are here to help reason about the buffer's own behavior, not to be reported on the wire.
 
 ### Why This is a Class (Not a Function)
 

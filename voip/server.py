@@ -1,7 +1,8 @@
 """
 WebSocket signaling server for VoIP call setup and teardown.
 
-Each JSON message type maps one to one onto a SIP concept:
+The call-control messages borrow their concepts from SIP. ICE candidate
+messages have no SIP equivalent and stay WebRTC-specific:
   "register" -> SIP REGISTER    (I am here, this is where you can reach me)
   "invite"   -> SIP INVITE      (I want to call you, here is my SDP offer)
   "answer"   -> SIP 200 OK      (I accept, here is my SDP answer)
@@ -9,9 +10,9 @@ Each JSON message type maps one to one onto a SIP concept:
   "bye"      -> SIP BYE         (I am hanging up)
   "reject"   -> SIP 603 Decline (I do not want to answer)
 
-Transport is the websockets library. A browser cannot open a raw TCP or UDP
-socket, and WebSocket is plumbing rather than VoIP, so the protocol work
-happens in the SIP, SDP, and RTP modules instead.
+Transport is the websockets library, a convenient full-duplex signaling
+channel to a browser. WebSocket is plumbing rather than VoIP, so the protocol
+work happens in the SIP, SDP, and RTP modules instead.
 """
 
 from __future__ import annotations

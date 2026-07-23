@@ -10,17 +10,25 @@ RTP runs over UDP, not TCP. That's deliberate, for real-time audio, a *late* pac
 
 ### Where It Fits
 
-RTP is the media plane of our VoIP call. SIP sets up the call (signaling), SDP negotiates the codec, then RTP carries the actual compressed audio samples between endpoints.
+RTP is the media plane. The call-control messages set up who is talking and
+which codec they agreed on, then the media carries the actual compressed audio
+between the two browsers.
 
 ```
-   Signaling plane:  Browser <--SIP--> Server <--SIP--> Browser
-                                        |
-                                        v (call setup done)
-   Media plane:      Browser <=====RTP over UDP=====> Browser
-                              (peer-to-peer via WebRTC)
+   Signaling:  Browser <--JSON/WebSocket--> Python <--JSON/WebSocket--> Browser
+                                              |
+                                              v (call setup done)
+   Media:      Browser <========= SRTP over WebRTC =========> Browser
+                              (peer-to-peer, or via a TURN relay)
 ```
 
-In our server-centric implementation, we don't handle the full media transport, the browser's WebRTC stack does that. But we parse RTP server-side for inspection (monitoring, recording, conferencing).
+Be clear about what runs in this project. The live media is encrypted SRTP set
+up and carried by the browser's WebRTC stack. The Python server never sees an
+RTP packet. The `rtp.py` in this repository is a standalone educational parser
+and builder, exercised by the tests, not by the live call. Read it to see how
+the wire format works. It is not inspecting real traffic. Server-side RTP
+parsing does happen in production systems that do monitoring, recording, or
+conferencing, which is the world this module is teaching toward.
 
 ### Key Terms
 

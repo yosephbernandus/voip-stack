@@ -12,14 +12,16 @@ SIP is text-based, like HTTP. If you've read an HTTP request, SIP will look fami
 
 A quick but important clarification. The live signaling path in this project
 does not send raw SIP text over WebSocket. It sends small JSON messages whose
-types map one to one onto SIP concepts (register, invite, answer, bye), which
-keeps the routing and the logs easy to read. This module is the from-scratch
+types borrow their concepts from SIP (register, invite, answer, bye), which
+keeps the routing and the logs easy to read. ICE candidate messages have no
+SIP equivalent and stay WebRTC-specific. This module is the from-scratch
 SIP parser and builder that shows what real SIP text looks like on the wire,
 and it is exercised by the tests rather than by the running server.
 
 With that said, the routing shape is the same either way: messages travel over
-WebSocket between the browsers and the Python server, which acts as a mini SIP
-proxy that parses each message, decides where it goes, and forwards it.
+WebSocket between the browsers and the Python server, which acts as a small
+signaling relay. Its JSON messages borrow their call-control concepts from SIP.
+The relay parses each message, decides where it goes, and forwards it.
 
 ```
   Browser A -- WebSocket --> Server -- WebSocket --> Browser B

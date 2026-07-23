@@ -15,8 +15,9 @@ Being precise about this matters, because it is easy to overclaim.
 **The live call uses three things:**
 
 - **Signaling:** JSON over WebSocket, routed by the Python server in
-  `voip/server.py`. Each message type maps one to one onto a SIP concept
-  (register, invite, answer, ICE, bye).
+  `voip/server.py`. The call-control messages borrow their concepts from SIP
+  (register, invite, answer, bye). ICE candidate messages have no SIP
+  equivalent and stay WebRTC-specific.
 - **Media:** encrypted SRTP, set up and carried by the browser's WebRTC stack.
   It flows directly between browsers when it can, and through a TURN relay when
   it cannot, which may include TCP or TLS. The Python server never touches
@@ -39,9 +40,10 @@ WebRTC.
 
 Everything in the protocol modules is standard library plus Pydantic, no VoIP
 libraries. The single exception is the WebSocket transport, which uses the
-`websockets` library. A browser cannot open a raw TCP or UDP socket, so
-WebSocket is the only way to reach it, and WebSocket is plumbing rather than
-VoIP. Keeping the transport off the shelf lets the from-scratch effort go where
+`websockets` library. A browser cannot open a raw TCP or UDP socket, and
+WebSocket is a convenient full-duplex signaling transport to it. WebSocket is
+plumbing rather than VoIP, so keeping it off the shelf lets the from-scratch
+effort go where
 it matters.
 
 ## Requirements
@@ -85,8 +87,8 @@ pip install -e ".[dev]"
 pytest
 ```
 
-The suite covers round trips, known-good vectors taken from the RFCs and from
-Wireshark captures, malformed input, and boundary conditions.
+The suite covers round trips, hand-built byte vectors of the kind you would
+see for these protocols on the wire, malformed input, and boundary conditions.
 
 ## How a call flows
 
@@ -104,8 +106,9 @@ Wireshark captures, malformed input, and boundary conditions.
 
 Two planes, kept separate:
 
-- **Signaling:** JSON over WebSocket, routed by Python. Each message type maps
-  one to one onto a SIP concept, which keeps the routing readable.
+- **Signaling:** JSON over WebSocket, routed by Python. The call-control
+  messages borrow their concepts from SIP, which keeps the routing readable.
+  ICE messages stay WebRTC-specific.
 - **Media:** encrypted SRTP negotiated and carried by WebRTC. The path is
   chosen by ICE and can be direct or relayed through TURN. The Python server is
   a rendezvous point for signaling and never touches the audio.
@@ -140,8 +143,10 @@ Each layer has a written walkthrough of the RFC and how this code implements it:
 
 Two browsers behind NAT cannot usually reach each other directly. The client
 uses ICE to find a path: a direct host route, a public address discovered
-through STUN, or a relay through TURN as a last resort. STUN is free and needs
-no setup. TURN relays real audio, so it needs credentials.
+through STUN, or a relay through TURN as a last resort. STUN only tells a peer
+its own public address, so its bandwidth cost is small and public servers are
+easy to use. TURN relays the actual audio, so it costs real bandwidth and needs
+credentials.
 
 To enable a TURN relay, set `TURN_KEY_ID` and `TURN_API_TOKEN` in the
 environment. The server mints short-lived credentials per session and delivers

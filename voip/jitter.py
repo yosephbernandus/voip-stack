@@ -36,12 +36,19 @@ def _sequence_before(a: int, b: int) -> bool:
 
 class JitterBuffer:
     """
-    Adaptive playout buffer for an RTP stream, per RFC 3550.
+    Fixed-delay playout buffer for an RTP stream, per RFC 3550.
 
     Holds received packets for at least target_delay_ms before releasing them
     in ascending sequence-number order.  Packets that arrive after their
     sequence number has already been passed are counted as late and discarded
     rather than forwarded out-of-order, which would cause audible glitches.
+
+    The delay is fixed at target_delay_ms. A production buffer usually adapts
+    this delay to measured network jitter; this one does not, which keeps the
+    logic readable. One other simplification: when several consecutive packets
+    are missing, a single get() skips the whole gap and returns the next
+    available packet, rather than producing one loss or concealment event per
+    missing 20 ms interval the way a production decoder would.
 
     JitterBuffer is the justified class-based exception to the functional
     style used elsewhere in this codebase: it maintains mutable state
