@@ -1,0 +1,1356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<title>VoIP from Scratch</title>
+<style>
+  /* ── Reset & Base ── */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    background: #0d1117;
+    color: #c9d1d9;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: #161b22;
+    border-bottom: 1px solid #30363d;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .header h1 { font-size: 16px; color: #58a6ff; }
+  .header .status {
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    background: #1f2937;
+  }
+  .header .status.online { color: #3fb950; border: 1px solid #238636; }
+  .header .status.offline { color: #f85149; border: 1px solid #da3633; }
+
+  /* ── Layout ── */
+  .container {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Left Panel: Controls ── */
+  .panel-left {
+    width: 320px;
+    min-width: 320px;
+    background: #161b22;
+    border-right: 1px solid #30363d;
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+    gap: 16px;
+    overflow-y: auto;
+  }
+
+  .section-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #8b949e;
+    margin-bottom: 8px;
+  }
+
+  /* ── User List ── */
+  .user-list {
+    list-style: none;
+  }
+  .user-list li {
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+  }
+  .user-list li:hover { background: #1f2937; }
+  .user-list li::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #3fb950;
+  }
+  .user-list .empty {
+    color: #484f58;
+    font-style: italic;
+    cursor: default;
+  }
+  .user-list .empty::before { display: none; }
+
+  /* ── Call Controls ── */
+  .call-controls {
+    display: flex;
+    gap: 8px;
+  }
+  .call-controls input {
+    flex: 1;
+    min-width: 0;  /* allow shrinking below intrinsic size on narrow screens */
+    padding: 8px 12px;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #c9d1d9;
+    font-family: inherit;
+    font-size: 13px;
+  }
+  .call-controls input:focus {
+    outline: none;
+    border-color: #58a6ff;
+  }
+
+  .btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    transition: opacity 0.15s;
+  }
+  .btn:hover { opacity: 0.85; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-call { background: #238636; color: #fff; }
+  .btn-hangup { background: #da3633; color: #fff; }
+  .btn-answer { background: #238636; color: #fff; }
+  .btn-reject { background: #da3633; color: #fff; }
+
+  /* ── Incoming Call Banner ── */
+  .incoming-call {
+    display: none;
+    background: #1c2128;
+    border: 1px solid #f0883e;
+    border-radius: 8px;
+    padding: 12px;
+    animation: pulse 2s infinite;
+  }
+  .incoming-call.visible { display: block; }
+  .incoming-call .caller {
+    font-size: 14px;
+    color: #f0883e;
+    margin-bottom: 8px;
+  }
+  .incoming-call .actions { display: flex; gap: 8px; }
+
+  @keyframes pulse {
+    0%, 100% { border-color: #f0883e; }
+    50% { border-color: #f0883e80; }
+  }
+
+  /* ── Active Call Banner ── */
+  .active-call {
+    display: none;
+    background: #1c2128;
+    border: 1px solid #238636;
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .active-call.visible { display: block; }
+  .active-call .call-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .active-call .peer-name { color: #3fb950; font-size: 14px; }
+  .active-call .call-timer { color: #8b949e; font-size: 13px; font-variant-numeric: tabular-nums; }
+
+  /* ── Audio Level Meter ── */
+  .level-meter {
+    height: 4px;
+    background: #21262d;
+    border-radius: 2px;
+    margin: 8px 0;
+    overflow: hidden;
+  }
+  .level-meter .level {
+    height: 100%;
+    background: #3fb950;
+    border-radius: 2px;
+    width: 0%;
+    transition: width 0.1s;
+  }
+
+  /* ── Right Panel: Protocol Log ── */
+  .panel-right {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .log-header {
+    padding: 12px 20px;
+    background: #161b22;
+    border-bottom: 1px solid #30363d;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #8b949e;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .log-header button {
+    background: none;
+    border: 1px solid #30363d;
+    color: #8b949e;
+    padding: 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+  }
+  .log-header button:hover { border-color: #58a6ff; color: #58a6ff; }
+
+  .log-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 20px;
+  }
+
+  .log-entry {
+    padding: 6px 0;
+    border-bottom: 1px solid #21262d;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .log-entry .timestamp {
+    color: #484f58;
+    margin-right: 8px;
+    font-size: 11px;
+  }
+  .log-entry .direction {
+    margin-right: 4px;
+    font-size: 11px;
+  }
+  .log-entry .direction.sent { color: #58a6ff; }
+  .log-entry .direction.recv { color: #f0883e; }
+
+  /* Message type colors */
+  .msg-register { color: #bc8cff; }
+  .msg-registered { color: #bc8cff; }
+  .msg-invite { color: #3fb950; }
+  .msg-answer { color: #58a6ff; }
+  .msg-ice { color: #d29922; }
+  .msg-bye { color: #f85149; }
+  .msg-reject, .msg-rejected { color: #f85149; }
+  .msg-error { color: #f85149; }
+  .msg-user_online { color: #3fb950; }
+  .msg-user_offline { color: #8b949e; }
+
+  .log-entry .sip-label {
+    color: #484f58;
+    font-size: 11px;
+    margin-left: 6px;
+    font-style: italic;
+  }
+
+  .log-entry .sdp-toggle {
+    color: #484f58;
+    cursor: pointer;
+    font-size: 11px;
+    margin-left: 8px;
+  }
+  .log-entry .sdp-toggle:hover { color: #8b949e; }
+  .log-entry .sdp-body {
+    display: none;
+    background: #0d1117;
+    border: 1px solid #21262d;
+    border-radius: 4px;
+    padding: 8px;
+    margin-top: 4px;
+    font-size: 11px;
+    white-space: pre-wrap;
+    color: #8b949e;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .log-entry .sdp-body.visible { display: block; }
+
+  /* ── Mobile (≤ 768px): one column, thumb-zone actions ──
+     Touch targets follow Material 48dp / Apple HIG 44pt minimums.
+     Incoming call becomes a full-screen overlay with decline-left /
+     answer-right, matching the native iOS/Android call screen. */
+  @media (max-width: 768px) {
+    body { height: 100dvh; }  /* dvh: mobile browser chrome shrinks vh */
+
+    .container { flex-direction: column; }
+    .panel-left {
+      width: 100%;
+      min-width: 0;
+      flex: none;
+      max-height: 55dvh;
+      border-right: none;
+      border-bottom: 1px solid #30363d;
+    }
+    .panel-right { flex: 1; min-height: 0; }
+
+    .btn { min-height: 48px; padding: 12px 20px; font-size: 15px; }
+    .call-controls input {
+      min-height: 48px;
+      font-size: 16px;  /* ≥16px prevents iOS zoom-on-focus */
+    }
+    .user-list li { padding: 14px 12px; min-height: 48px; }
+    .log-header button { min-height: 40px; padding: 8px 14px; }
+
+    /* Incoming call: full-screen, caller top third, actions bottom third */
+    .incoming-call.visible {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      background: rgba(13, 17, 23, 0.96);
+      border: none;
+      border-radius: 0;
+      padding: 25dvh 24px calc(32px + env(safe-area-inset-bottom));
+      text-align: center;
+      animation: none;
+    }
+    .incoming-call .caller { font-size: 22px; }
+    .incoming-call .actions { gap: 24px; }
+    .incoming-call .actions .btn {
+      flex: 1;
+      min-height: 64px;
+      font-size: 17px;
+      border-radius: 32px;
+    }
+    #rejectBtn { order: 1; }  /* decline left, platform convention */
+    #answerBtn { order: 2; }  /* answer right */
+  }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>VoIP from Scratch</h1>
+    <span id="connStatus" class="status offline">disconnected</span>
+  </div>
+
+  <div class="container">
+    <!-- Left Panel: Controls -->
+    <div class="panel-left">
+      <!-- Identity -->
+      <div>
+        <div class="section-title">Your Identity</div>
+        <div id="myUsername" style="font-size: 16px; color: #58a6ff;">—</div>
+      </div>
+
+      <!-- Registration -->
+      <div>
+        <div class="section-title">Register</div>
+        <div class="call-controls">
+          <input id="usernameInput" type="text" placeholder="enter username">
+          <button id="registerBtn" class="btn btn-call">Register</button>
+        </div>
+      </div>
+
+      <!-- Online Users -->
+      <div>
+        <div class="section-title">Online Users</div>
+        <ul id="userList" class="user-list">
+          <li class="empty">No other users online</li>
+        </ul>
+      </div>
+
+      <!-- Make a Call -->
+      <div>
+        <div class="section-title">Make a Call</div>
+        <div class="call-controls">
+          <input id="targetInput" type="text" placeholder="username to call">
+          <button id="callBtn" class="btn btn-call" disabled>Call</button>
+          <button id="hangupBtn" class="btn btn-hangup" style="display:none;">Hang Up</button>
+        </div>
+      </div>
+
+      <!-- Incoming Call -->
+      <div id="incomingCall" class="incoming-call">
+        <div class="caller">Incoming call from <strong id="callerName"></strong></div>
+        <div class="actions">
+          <button id="answerBtn" class="btn btn-answer">Answer</button>
+          <button id="rejectBtn" class="btn btn-reject">Reject</button>
+        </div>
+      </div>
+
+      <!-- Active Call -->
+      <div id="activeCall" class="active-call">
+        <div class="call-info">
+          <span class="peer-name">In call with <strong id="peerName"></strong></span>
+          <span id="callTimer" class="call-timer">00:00</span>
+        </div>
+        <div class="level-meter">
+          <div id="audioLevel" class="level"></div>
+        </div>
+        <!-- Shown only when the browser blocks autoplay (mobile Chrome/Safari):
+             a user tap is a gesture, which unblocks play(). -->
+        <button id="enableAudioBtn" class="btn btn-call" style="display:none; width:100%; margin-top:8px;">
+          🔊 Tap to enable audio
+        </button>
+      </div>
+    </div>
+
+    <!-- Right Panel: Protocol Log -->
+    <div class="panel-right">
+      <div class="log-header">
+        <span>Protocol Log, JSON messages with SIP mapping</span>
+        <button onclick="document.getElementById('logContainer').innerHTML=''">Clear</button>
+      </div>
+      <div id="logContainer" class="log-container"></div>
+    </div>
+  </div>
+
+  <!-- Hidden audio element for remote stream. playsinline is required on
+       mobile browsers; autoplay can still be blocked there, so ontrack also
+       calls play() explicitly and falls back to a tap-to-enable button. -->
+  <audio id="remoteAudio" autoplay playsinline></audio>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════
+// This client implements the browser side of our JSON-over-WebSocket
+// signaling protocol. The protocol maps to SIP concepts:
+//
+//   register  → SIP REGISTER   (announce presence, get user list)
+//   invite    → SIP INVITE     (call offer with SDP)
+//   answer    → SIP 200 OK     (accept call with SDP answer)
+//   ice       → (WebRTC only)  (ICE candidate for NAT traversal)
+//   bye       → SIP BYE        (hang up)
+//   reject    → SIP 603 Decline (decline incoming call)
+//
+// Call setup follows the WebRTC offer/answer model (RFC 3264):
+//   Caller: getUserMedia → createOffer → setLocalDescription → send invite
+//   Callee: getUserMedia → setRemoteDescription → createAnswer
+//           → setLocalDescription → send answer
+//   Both:   trickle ICE candidates until peer-to-peer media flows
+// ═══════════════════════════════════════════════════════════════════════
+
+// ── State ──
+let ws = null;
+let pc = null;           // RTCPeerConnection
+let localStream = null;  // microphone stream
+let myUsername = '';
+let currentCallId = '';
+let currentPeer = '';
+let callStartTime = null;
+let callTimerInterval = null;
+let audioAnalyser = null;
+let audioAnimFrame = null;
+let registered = false;
+
+// ── DOM References ──
+const connStatus = document.getElementById('connStatus');
+const myUsernameEl = document.getElementById('myUsername');
+const usernameInput = document.getElementById('usernameInput');
+const registerBtn = document.getElementById('registerBtn');
+const userList = document.getElementById('userList');
+const targetInput = document.getElementById('targetInput');
+const callBtn = document.getElementById('callBtn');
+const hangupBtn = document.getElementById('hangupBtn');
+const incomingCall = document.getElementById('incomingCall');
+const callerName = document.getElementById('callerName');
+const answerBtn = document.getElementById('answerBtn');
+const rejectBtn = document.getElementById('rejectBtn');
+const activeCall = document.getElementById('activeCall');
+const peerName = document.getElementById('peerName');
+const callTimer = document.getElementById('callTimer');
+const audioLevel = document.getElementById('audioLevel');
+const logContainer = document.getElementById('logContainer');
+const remoteAudio = document.getElementById('remoteAudio');
+
+// ═══════════════════════════════════════════════════════════════════════
+// WebSocket Connection
+// ═══════════════════════════════════════════════════════════════════════
+
+function connect() {
+  // Connect to the WebSocket endpoint on our Python signaling server.
+  // The browser sends an HTTP GET / with Upgrade: websocket headers,
+  // and our server responds with 101 Switching Protocols.
+  //
+  // Use wss:// (secure WebSocket) when loaded over HTTPS,
+  // ws:// when loaded over HTTP.
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  // window.location.host includes port (e.g. "localhost:8080"), so this
+  // automatically connects to the same host/port that served the page.
+  ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
+
+  ws.onopen = () => {
+    connStatus.textContent = 'connected';
+    connStatus.className = 'status online';
+    logProtocol('WebSocket connected');
+    // Don't auto-register, wait for user to enter username and click Register
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    logMessage('recv', msg);
+    handleMessage(msg);
+  };
+
+  ws.onclose = () => {
+    connStatus.textContent = 'disconnected';
+    connStatus.className = 'status offline';
+    callBtn.disabled = true;
+    registered = false;
+    logProtocol('WebSocket disconnected, reconnecting in 3s...');
+    // Reconnect after a delay
+    setTimeout(connect, 3000);
+  };
+
+  ws.onerror = () => {
+    ws.close();
+  };
+}
+
+function send(msg) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    logMessage('sent', msg);
+    ws.send(JSON.stringify(msg));
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Registration
+//
+// Equivalent to SIP REGISTER (RFC 3261 §10): the UA announces its
+// presence to the registrar and receives a list of reachable peers.
+// ═══════════════════════════════════════════════════════════════════════
+
+registerBtn.addEventListener('click', () => {
+  const username = usernameInput.value.trim();
+  if (!username) {
+    logProtocol('Error: username cannot be empty');
+    return;
+  }
+  myUsername = username;
+  myUsernameEl.textContent = username;
+
+  // Send register, server responds with {type: "registered", users: [...]}
+  send({ type: 'register', username: myUsername });
+});
+
+usernameInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') registerBtn.click();
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// Message Handling
+// ═══════════════════════════════════════════════════════════════════════
+
+function handleMessage(msg) {
+  switch (msg.type) {
+    case 'registered':
+      // Server confirmed our registration and sent us the list of
+      // other online users (equivalent to a SIP 200 OK for REGISTER).
+      // The list contains only OTHER users, not ourselves.
+      registered = true;
+      callBtn.disabled = false;
+      updateUserList(msg.users || []);
+      // Session ICE servers: the server may include freshly minted,
+      // short-lived TURN credentials for NAT traversal.
+      if (Array.isArray(msg.ice_servers) && msg.ice_servers.length > 0) {
+        iceServers = msg.ice_servers;
+        const hasTurn = iceServers.some(s =>
+          [].concat(s.urls).some(u => u.startsWith('turn')));
+        // Spell the acronyms out once, on first appearance, so the demo log
+        // teaches what STUN/TURN/ICE stand for before the short forms recur.
+        logProtocol('ICE = Interactive Connectivity Establishment (races network paths to find one that works)');
+        logProtocol('STUN = Session Traversal Utilities for NAT (asks a server for your public address)');
+        if (hasTurn) {
+          logProtocol('TURN = Traversal Using Relays around NAT (relays the voice when a direct path fails)');
+        }
+        logProtocol(`ICE servers received (${hasTurn ? 'STUN + TURN relay' : 'STUN only'})`);
+      }
+      logProtocol(`Registered as "${myUsername}", ${(msg.users || []).length} user(s) online`);
+      break;
+
+    case 'user_online':
+      // A new user registered, broadcast to all existing users
+      addUser(msg.username);
+      break;
+
+    case 'user_offline':
+      // A user disconnected, broadcast to remaining users
+      removeUser(msg.username);
+      break;
+
+    case 'invite':
+      // Incoming call, peer sent us a SIP INVITE (SDP offer).
+      // We must display a notification and wait for user to accept/reject.
+      handleIncomingCall(msg);
+      break;
+
+    case 'answer':
+      // Our outgoing call was answered, we received the SDP answer.
+      // Complete the offer/answer exchange and establish WebRTC.
+      handleAnswer(msg);
+      break;
+
+    case 'ice':
+      // ICE candidate from peer, add it to our RTCPeerConnection.
+      // ICE candidates represent network addresses the peer can be reached at.
+      handleICECandidate(msg);
+      break;
+
+    case 'bye':
+      // Call ended by the other party (SIP BYE)
+      logProtocol(`Call ended by ${msg.username}`);
+      endCall();
+      break;
+
+    case 'rejected':
+      // Our outgoing call was declined (SIP 603 Decline)
+      logProtocol(`Call rejected by ${msg.username}`);
+      endCall();
+      break;
+
+    case 'error':
+      logProtocol(`Server error ${msg.code}: ${msg.message}`);
+      break;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Call Flow: Outgoing
+//
+// WebRTC offer/answer exchange (RFC 3264):
+// 1. getUserMedia(), request microphone access from browser
+// 2. new RTCPeerConnection(), create connection with STUN config
+// 3. addTrack(), attach our audio to the peer connection
+// 4. createOffer(), generate our SDP offer (codecs, ICE options, etc.)
+// 5. setLocalDescription(), commit offer as our local SDP
+// 6. Send invite with SDP offer to callee via signaling server
+// 7. Receive answer, setRemoteDescription() to complete the exchange
+// 8. Trickle ICE, exchange candidates until media path is found
+// 9. ontrack fires, attach remote audio stream to <audio> element
+// ═══════════════════════════════════════════════════════════════════════
+
+callBtn.addEventListener('click', async () => {
+  const target = targetInput.value.trim();
+  if (!target) return;
+
+  currentPeer = target;
+  // Generate a call ID, in SIP this would be the Call-ID header,
+  // which uniquely identifies a dialog across all parties and proxies.
+  currentCallId = generateCallId();
+
+  try {
+    // Step 1: Get microphone access.
+    // The browser will prompt the user for permission. We request only
+    // audio, video would need {audio: true, video: true}.
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+    // Step 2 & 3: Create peer connection and add audio tracks
+    createPeerConnection();
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+    // Step 4-5: Create SDP offer and set as local description.
+    // The SDP (Session Description Protocol, RFC 4566) describes:
+    //   - Which audio/video codecs we support (e.g. Opus, G.711)
+    //   - Our ICE credentials (for NAT traversal)
+    //   - DTLS fingerprint (for SRTP encryption)
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    // Step 6: Forward the offer to the callee via our signaling server.
+    // This is the JSON equivalent of a SIP INVITE message.
+    send({
+      type: 'invite',
+      target: target,
+      sdp: offer.sdp,
+      call_id: currentCallId,
+    });
+
+    // Update UI to show we're waiting for answer
+    callBtn.style.display = 'none';
+    hangupBtn.style.display = '';
+    targetInput.disabled = true;
+
+  } catch (err) {
+    logProtocol(`Call failed: ${err.message}`);
+    endCall();
+  }
+});
+
+hangupBtn.addEventListener('click', () => {
+  // Send BYE, equivalent to SIP BYE (RFC 3261 §15)
+  send({ type: 'bye', target: currentPeer, call_id: currentCallId });
+  endCall();
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// Call Flow: Incoming
+// ═══════════════════════════════════════════════════════════════════════
+
+function handleIncomingCall(msg) {
+  currentPeer = msg.username;
+  currentCallId = msg.call_id;
+
+  // Stash the SDP offer for when the user clicks Answer
+  incomingCall._offerSDP = msg.sdp;
+
+  // Show incoming call notification
+  callerName.textContent = msg.username;
+  incomingCall.classList.add('visible');
+}
+
+answerBtn.addEventListener('click', async () => {
+  incomingCall.classList.remove('visible');
+
+  try {
+    // Get microphone
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+    // Create peer connection and add our audio
+    createPeerConnection();
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+    // Set remote description to the caller's SDP offer.
+    // This tells our WebRTC stack what codecs/ICE the caller supports.
+    await pc.setRemoteDescription(new RTCSessionDescription({
+      type: 'offer',
+      sdp: incomingCall._offerSDP,
+    }));
+
+    // The caller's trickled candidates arrived while we were still
+    // ringing, add them now that the remote description exists.
+    await flushPendingCandidates();
+
+    // Create our SDP answer, our response to the offer.
+    // The answer must select a subset of what the offer proposed.
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    // Send answer to caller, JSON equivalent of SIP 200 OK
+    send({
+      type: 'answer',
+      target: currentPeer,
+      sdp: answer.sdp,
+      call_id: currentCallId,
+    });
+
+    startActiveCall();
+
+  } catch (err) {
+    logProtocol(`Answer failed: ${err.message}`);
+    endCall();
+  }
+});
+
+rejectBtn.addEventListener('click', () => {
+  incomingCall.classList.remove('visible');
+  // Send reject, JSON equivalent of SIP 603 Decline
+  send({ type: 'reject', target: currentPeer, call_id: currentCallId });
+  currentPeer = '';
+  currentCallId = '';
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// WebRTC Peer Connection
+// ═══════════════════════════════════════════════════════════════════════
+
+// ICE server list for NAT traversal.
+// STUN (RFC 5389) lets each browser discover its public address; it is
+// enough when the network allows direct peer-to-peer traffic. When it
+// does not (AP isolation on wifi, carrier-grade NAT on mobile data),
+// the voice needs a TURN relay (RFC 8656). The server mints short-lived
+// TURN credentials per session and delivers them inside the "registered"
+// reply, never on a public unauthenticated endpoint.
+let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+
+// Debug/demo switch: open the page as /?relay=1 to force ALL media through
+// the TURN relay (no host/srflx candidates). If a relay-forced call works,
+// the TURN setup is proven end to end; if a normal call then still fails,
+// the problem is candidate selection, not the relay.
+const forceRelay = new URLSearchParams(location.search).has('relay');
+
+function createPeerConnection() {
+  pc = new RTCPeerConnection({
+    iceServers,
+    ...(forceRelay ? { iceTransportPolicy: 'relay' } : {}),
+  });
+  if (forceRelay) {
+    logProtocol('iceTransportPolicy=relay, media forced through TURN');
+  }
+
+  // ICE candidate event, fired as the browser discovers network paths.
+  // We forward each candidate to the peer via the signaling server.
+  // This "trickle ICE" approach (RFC 8840) is faster than bundling all
+  // candidates into the SDP because connectivity checks start immediately.
+  pc.onicecandidate = (event) => {
+    if (event.candidate) {
+      send({
+        type: 'ice',
+        target: currentPeer,
+        candidate: event.candidate,
+      });
+    }
+  };
+
+  // Track event, fires when the remote peer's audio stream arrives.
+  // We attach the stream to an <audio autoplay> element so it plays.
+  pc.ontrack = (event) => {
+    remoteAudio.srcObject = event.streams[0];
+    playRemoteAudio();
+    startActiveCall();
+    startAudioLevel(event.streams[0]);
+  };
+
+  // Connection state changes, useful for detecting dropped calls
+  pc.onconnectionstatechange = () => {
+    logProtocol(`WebRTC state: ${pc.connectionState}`);
+    if (pc.connectionState === 'connected') {
+      logSelectedCandidatePair();
+    }
+    if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+      endCall();
+    }
+  };
+}
+
+// Mobile browsers may reject autoplay even for WebRTC streams. play()
+// returns a promise: if it rejects with NotAllowedError, we surface a
+// button, the tap is a user gesture, which lifts the restriction.
+function playRemoteAudio() {
+  const btn = document.getElementById('enableAudioBtn');
+  remoteAudio.play().then(() => {
+    btn.style.display = 'none';
+  }).catch((err) => {
+    logProtocol(`Audio autoplay blocked (${err.name}), tap the button to enable`);
+    btn.style.display = '';
+  });
+}
+
+document.getElementById('enableAudioBtn').addEventListener('click', () => {
+  playRemoteAudio();
+});
+
+// Log WHICH kind of network path won: host (direct LAN), srflx (through
+// NAT via STUN), or relay (TURN). If two phones never reach "connected",
+// the network is blocking peer-to-peer (AP isolation / CGNAT) and only a
+// TURN server would help, this log line is how you tell.
+async function logSelectedCandidatePair() {
+  if (!pc) return;
+  const stats = await pc.getStats();
+  stats.forEach((report) => {
+    if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) {
+      const local = stats.get(report.localCandidateId);
+      const remote = stats.get(report.remoteCandidateId);
+      if (local && remote) {
+        logProtocol(
+          `[ICE SELECTED] local=${local.candidateType} remote=${remote.candidateType}` +
+          ` (host=LAN direct, srflx=through NAT, relay=TURN)`
+        );
+      }
+    }
+  });
+}
+
+async function handleAnswer(msg) {
+  if (!pc) return;
+  // Set the callee's SDP answer as our remote description.
+  // After this, both sides have each other's SDP and the
+  // offer/answer exchange is complete (RFC 3264 §6).
+  await pc.setRemoteDescription(new RTCSessionDescription({
+    type: 'answer',
+    sdp: msg.sdp,
+  }));
+  // Candidates that raced ahead of this answer were queued, add them now.
+  await flushPendingCandidates();
+}
+
+// Trickle ICE races human actions: the caller's candidates arrive while
+// the incoming-call banner is still up, before the callee has tapped
+// Answer, so before our RTCPeerConnection even exists. Dropping them is
+// fatal on relay-only paths: TURN servers only accept traffic from
+// addresses a permission was created for, so peer-reflexive discovery
+// cannot rescue the connection like it can on direct paths. Queue early
+// candidates and flush them once the remote description is in place.
+let pendingRemoteCandidates = [];
+
+async function handleICECandidate(msg) {
+  if (!msg.candidate) return;
+  if (!pc || !pc.remoteDescription) {
+    pendingRemoteCandidates.push(msg.candidate);
+    return;
+  }
+  try {
+    // Add the peer's ICE candidate to our connection.
+    // The browser tests each candidate for reachability and picks the best.
+    await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+  } catch (err) {
+    // Non-fatal, some candidates just don't work
+    // (e.g., a local LAN address when the peer is on a different network)
+  }
+}
+
+async function flushPendingCandidates() {
+  const queued = pendingRemoteCandidates;
+  pendingRemoteCandidates = [];
+  for (const candidate of queued) {
+    try {
+      await pc.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (err) {
+      // Non-fatal, same as above
+    }
+  }
+  if (queued.length) {
+    logProtocol(`Added ${queued.length} ICE candidate(s) queued before answer`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Call State Management
+// ═══════════════════════════════════════════════════════════════════════
+
+function startActiveCall() {
+  peerName.textContent = currentPeer;
+  activeCall.classList.add('visible');
+  callBtn.style.display = 'none';
+  hangupBtn.style.display = '';
+  targetInput.disabled = true;
+
+  // Start elapsed time counter
+  callStartTime = Date.now();
+  callTimerInterval = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - callStartTime) / 1000);
+    const mins = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    const secs = String(elapsed % 60).padStart(2, '0');
+    callTimer.textContent = `${mins}:${secs}`;
+  }, 1000);
+
+  // ── RTP/WebRTC Stats Monitor ──
+  // The browser tracks every RTP packet internally. pc.getStats() exposes:
+  //   inbound-rtp     , packets we receive (remote audio)
+  //   outbound-rtp    , packets we send (microphone)
+  //   candidate-pair  , the winning ICE network path
+  //   codec           , which audio codec is actually in use
+  // This is a unique educational window into the RTP layer beneath WebRTC.
+  startRTPMonitor();
+}
+
+let rtpMonitorInterval = null;
+let prevBytesReceived = 0;
+let prevBytesSent = 0;
+// Separate timestamps per direction: inbound and outbound reports arrive in
+// the same getStats() batch, so sharing one timestamp makes the second
+// handler divide by a ~zero time delta (the "Infinitykbps" bug).
+let prevRecvTimestamp = 0;
+let prevSendTimestamp = 0;
+
+function startRTPMonitor() {
+  // Guard against double-start: startActiveCall() can run more than once
+  // (e.g. renegotiation); a leaked interval doubles every log line.
+  if (rtpMonitorInterval) clearInterval(rtpMonitorInterval);
+  prevBytesReceived = 0;
+  prevBytesSent = 0;
+  prevRecvTimestamp = 0;
+  prevSendTimestamp = 0;
+
+  rtpMonitorInterval = setInterval(async () => {
+    if (!pc) return;
+
+    const stats = await pc.getStats();
+    // pc.getStats() returns a Map of RTCStatsReport objects.
+    // Each report has a "type" field identifying what it measures.
+    stats.forEach(report => {
+      if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+        // ── Inbound RTP: audio arriving FROM the remote peer ──
+        // packetsReceived, packetsLost, jitter are key RTP quality metrics
+        // (defined in RFC 3550 §6.4, the RTCP Receiver Report fields)
+        const now = report.timestamp;
+        const bytesReceived = report.bytesReceived || 0;
+        const bitrateKbps = prevRecvTimestamp > 0 && now > prevRecvTimestamp
+          ? ((bytesReceived - prevBytesReceived) * 8 / (now - prevRecvTimestamp)).toFixed(1)
+          : '...';
+
+        // codecId is an internal stats ID ("CIT01_111"), resolve it to the
+        // human-readable mimeType via the codec report in the same batch.
+        const codecReport = report.codecId ? stats.get(report.codecId) : null;
+
+        logProtocol(
+          `[RTP ↓ RECV] packets=${report.packetsReceived}` +
+          ` lost=${report.packetsLost}` +
+          ` bitrate=${bitrateKbps}kbps` +
+          ` jitter=${(report.jitter * 1000).toFixed(1)}ms` +
+          (codecReport ? ` codec=${codecReport.mimeType}` : '')
+        );
+
+        prevBytesReceived = bytesReceived;
+        prevRecvTimestamp = now;
+      }
+
+      if (report.type === 'outbound-rtp' && report.kind === 'audio') {
+        // ── Outbound RTP: audio we're SENDING from our microphone ──
+        const now = report.timestamp;
+        const bytesSent = report.bytesSent || 0;
+        const bitrateKbps = prevSendTimestamp > 0 && now > prevSendTimestamp
+          ? ((bytesSent - prevBytesSent) * 8 / (now - prevSendTimestamp)).toFixed(1)
+          : '...';
+
+        logProtocol(
+          `[RTP ↑ SEND] packets=${report.packetsSent}` +
+          ` bitrate=${bitrateKbps}kbps` +
+          ` retransmitted=${report.retransmittedPacketsSent || 0}`
+        );
+
+        prevBytesSent = bytesSent;
+        prevSendTimestamp = now;
+      }
+
+      if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+        // ── ICE Candidate Pair: the winning network path ──
+        // Shows HOW the two browsers are actually connected:
+        //   host↔host   = same LAN (no NAT traversal needed)
+        //   srflx↔srflx = through NATs via STUN (most common)
+        //   relay↔relay = through TURN server (symmetric NAT fallback)
+        logProtocol(
+          `[ICE PAIR] rtt=${report.currentRoundTripTime ?
+            (report.currentRoundTripTime * 1000).toFixed(0) + 'ms' : '?'}` +
+          ` bytes: sent=${report.bytesSent} recv=${report.bytesReceived}` +
+          ` local=${report.localCandidateId} remote=${report.remoteCandidateId}`
+        );
+      }
+
+      if (report.type === 'codec') {
+        // ── Codec: what audio codec is actually in use ──
+        // Typically Opus (RFC 6716) for WebRTC, adaptive bitrate,
+        // designed for voice (8-48kHz, 6-510kbps).
+        logProtocol(
+          `[CODEC] ${report.mimeType}` +
+          ` clockRate=${report.clockRate}Hz` +
+          ` channels=${report.channels || '?'}` +
+          (report.sdpFmtpLine ? ` params: ${report.sdpFmtpLine}` : '')
+        );
+      }
+    });
+  }, 2000);
+}
+
+function endCall() {
+  // Stop RTP stats monitor
+  if (rtpMonitorInterval) {
+    clearInterval(rtpMonitorInterval);
+    rtpMonitorInterval = null;
+    prevBytesReceived = 0;
+    prevBytesSent = 0;
+    prevTimestamp = 0;
+  }
+
+  // Close WebRTC peer connection, tears down all media and ICE state
+  if (pc) {
+    pc.close();
+    pc = null;
+  }
+
+  // Stop local media tracks, releases the microphone
+  if (localStream) {
+    localStream.getTracks().forEach(track => track.stop());
+    localStream = null;
+  }
+
+  // Stop audio level visualization
+  if (audioAnimFrame) {
+    cancelAnimationFrame(audioAnimFrame);
+    audioAnimFrame = null;
+    audioAnalyser = null;
+  }
+
+  // Clear remote audio
+  remoteAudio.srcObject = null;
+  document.getElementById('enableAudioBtn').style.display = 'none';
+  pendingRemoteCandidates = [];
+
+  // Stop call timer
+  if (callTimerInterval) {
+    clearInterval(callTimerInterval);
+    callTimerInterval = null;
+  }
+
+  // Reset UI
+  activeCall.classList.remove('visible');
+  incomingCall.classList.remove('visible');
+  callBtn.style.display = '';
+  hangupBtn.style.display = 'none';
+  targetInput.disabled = false;
+  callTimer.textContent = '00:00';
+  audioLevel.style.width = '0%';
+
+  currentPeer = '';
+  currentCallId = '';
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Audio Level Meter
+//
+// Uses the Web Audio API AnalyserNode to measure volume of the remote
+// stream. We compute RMS (root mean square) of the time-domain waveform
+//, a simple and perceptually meaningful loudness estimate.
+// ═══════════════════════════════════════════════════════════════════════
+
+function startAudioLevel(stream) {
+  try {
+    const audioCtx = new AudioContext();
+    // Mobile browsers start AudioContext suspended until a user gesture;
+    // resume() is safe to call unconditionally.
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const source = audioCtx.createMediaStreamSource(stream);
+    audioAnalyser = audioCtx.createAnalyser();
+    audioAnalyser.fftSize = 256;
+    source.connect(audioAnalyser);
+
+    const dataArray = new Uint8Array(audioAnalyser.frequencyBinCount);
+
+    function updateLevel() {
+      if (!audioAnalyser) return;
+      audioAnalyser.getByteTimeDomainData(dataArray);
+
+      // Compute RMS level (0-1 range). Each sample is 0-255, midpoint=128.
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) {
+        const val = (dataArray[i] - 128) / 128; // normalize to -1..1
+        sum += val * val;
+      }
+      const rms = Math.sqrt(sum / dataArray.length);
+      const pct = Math.min(100, rms * 400); // amplify for visibility
+
+      audioLevel.style.width = pct + '%';
+      audioAnimFrame = requestAnimationFrame(updateLevel);
+    }
+
+    updateLevel();
+  } catch (err) {
+    // Audio analysis is optional, don't break the call if it fails
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// User List Management
+// ═══════════════════════════════════════════════════════════════════════
+
+let onlineUsers = [];
+
+function updateUserList(users) {
+  onlineUsers = users;
+  renderUserList();
+}
+
+function addUser(username) {
+  if (!onlineUsers.includes(username)) {
+    onlineUsers.push(username);
+  }
+  renderUserList();
+}
+
+function removeUser(username) {
+  onlineUsers = onlineUsers.filter(u => u !== username);
+  renderUserList();
+}
+
+function renderUserList() {
+  if (onlineUsers.length === 0) {
+    userList.innerHTML = '<li class="empty">No other users online</li>';
+    return;
+  }
+
+  userList.innerHTML = '';
+  onlineUsers.forEach(name => {
+    const li = document.createElement('li');
+
+    const nameSpan = document.createElement('span');
+    nameSpan.style.flex = '1';
+    nameSpan.textContent = name;
+
+    // "Call" button on each user row, click to auto-fill target and call
+    const callUserBtn = document.createElement('button');
+    callUserBtn.className = 'btn btn-call';
+    callUserBtn.textContent = 'Call';
+    callUserBtn.style.padding = '4px 10px';
+    callUserBtn.style.fontSize = '12px';
+    callUserBtn.addEventListener('click', () => {
+      targetInput.value = name;
+      callBtn.click();
+    });
+
+    // Click on name to fill target input
+    nameSpan.addEventListener('click', () => {
+      targetInput.value = name;
+    });
+
+    li.appendChild(nameSpan);
+    li.appendChild(callUserBtn);
+    userList.appendChild(li);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Protocol Log
+//
+// Displays every signaling message with:
+//   - Timestamp
+//   - Direction arrow (→ sent, ← received)
+//   - Message type with color coding
+//   - SIP mapping label (educational, shows equivalent SIP method/response)
+//   - Collapsible SDP body (SDP can be 20+ lines, so we hide it by default)
+//
+// SIP mapping reference:
+//   register        → SIP REGISTER
+//   invite (out)    → SIP INVITE
+//   answer (out)    → SIP 200 OK
+//   bye             → SIP BYE
+//   reject          → SIP 603 Decline
+//   ice             → WebRTC-specific (no SIP equivalent)
+//   registered      → SIP 200 OK (response to REGISTER)
+//   rejected        → SIP 603 Decline
+// ═══════════════════════════════════════════════════════════════════════
+
+// Maps each message type + direction to a SIP label for the protocol log
+const SIP_LABELS = {
+  'sent:register':   'SIP REGISTER',
+  'sent:invite':     'SIP INVITE',
+  'sent:answer':     'SIP 200 OK',
+  'sent:bye':        'SIP BYE',
+  'sent:reject':     'SIP 603 Decline',
+  'sent:ice':        'WebRTC ICE (no SIP equiv.)',
+  'recv:registered': 'SIP 200 OK (REGISTER)',
+  'recv:invite':     'SIP INVITE (incoming)',
+  'recv:answer':     'SIP 200 OK (answer)',
+  'recv:bye':        'SIP BYE (remote)',
+  'recv:rejected':   'SIP 603 Decline',
+  'recv:ice':        'WebRTC ICE (no SIP equiv.)',
+  'recv:error':      'SIP 4xx/5xx Error',
+  'recv:user_online': 'presence update',
+  'recv:user_offline': 'presence update',
+};
+
+function logMessage(direction, msg) {
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+
+  const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+  const arrow = direction === 'sent' ? '→' : '←';
+  const dirClass = direction === 'sent' ? 'sent' : 'recv';
+  const typeClass = `msg-${msg.type}`;
+
+  // Build detail string from notable fields
+  let detail = '';
+  if (msg.username) detail += ` user=${msg.username}`;
+  if (msg.target) detail += ` target=${msg.target}`;
+  if (msg.call_id) detail += ` call_id=${msg.call_id}`;
+  if (msg.users) detail += ` users=[${msg.users.join(', ')}]`;
+  if (msg.message) detail += ` "${msg.message}"`;
+  if (msg.candidate) {
+    // Show the candidate type: host (direct LAN), srflx (public address
+    // via STUN), or relay (through the TURN server). Whether "relay"
+    // appears here is THE diagnostic for TURN problems.
+    const typMatch = (msg.candidate.candidate || '').match(/ typ (\w+)/);
+    detail += ` [ICE candidate${typMatch ? ': ' + typMatch[1] : ''}]`;
+  }
+
+  const timestamp = document.createElement('span');
+  timestamp.className = 'timestamp';
+  timestamp.textContent = time;
+
+  const dir = document.createElement('span');
+  dir.className = `direction ${dirClass}`;
+  dir.textContent = arrow;
+
+  const typeSpan = document.createElement('span');
+  typeSpan.className = typeClass;
+  typeSpan.textContent = msg.type.toUpperCase();
+
+  const detailSpan = document.createElement('span');
+  detailSpan.textContent = detail;
+
+  entry.appendChild(timestamp);
+  entry.appendChild(dir);
+  entry.appendChild(document.createTextNode(' '));
+  entry.appendChild(typeSpan);
+  entry.appendChild(detailSpan);
+
+  // SIP mapping label
+  const sipKey = `${direction}:${msg.type}`;
+  const sipLabel = SIP_LABELS[sipKey];
+  if (sipLabel) {
+    const label = document.createElement('span');
+    label.className = 'sip-label';
+    label.textContent = `[≡ ${sipLabel}]`;
+    entry.appendChild(label);
+  }
+
+  // Collapsible SDP section, SDP bodies are verbose, hide by default
+  if (msg.sdp) {
+    const toggle = document.createElement('span');
+    toggle.className = 'sdp-toggle';
+    toggle.textContent = '[show SDP]';
+
+    const sdpBody = document.createElement('div');
+    sdpBody.className = 'sdp-body';
+    sdpBody.textContent = msg.sdp;
+
+    toggle.addEventListener('click', () => {
+      sdpBody.classList.toggle('visible');
+      toggle.textContent = sdpBody.classList.contains('visible') ? '[hide SDP]' : '[show SDP]';
+    });
+
+    entry.appendChild(toggle);
+    entry.appendChild(sdpBody);
+  }
+
+  logContainer.appendChild(entry);
+  logContainer.scrollTop = logContainer.scrollHeight;
+}
+
+function logProtocol(text) {
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+
+  const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+  const timestamp = document.createElement('span');
+  timestamp.className = 'timestamp';
+  timestamp.textContent = time;
+
+  const content = document.createElement('span');
+  content.style.color = '#8b949e';
+  content.textContent = text;
+
+  entry.appendChild(timestamp);
+  entry.appendChild(content);
+  logContainer.appendChild(entry);
+  logContainer.scrollTop = logContainer.scrollHeight;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Utilities
+// ═══════════════════════════════════════════════════════════════════════
+
+function generateCallId() {
+  // Generate a unique call identifier.
+  // In SIP this would be the Call-ID header (RFC 3261 §20.8) which
+  // globally and uniquely identifies a dialog across all participants.
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback for older browsers
+  return Math.random().toString(36).substring(2, 10) +
+         Math.random().toString(36).substring(2, 10);
+}
+
+// ── Start ──
+connect();
+</script>
+</body>
+</html>

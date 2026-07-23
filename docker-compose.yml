@@ -1,0 +1,19 @@
+# Local run: `docker compose up --build`, then open http://localhost:8080
+# in two browser tabs to place a call between them.
+services:
+  voip:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      # Optional TURN relay for calls that cannot connect peer to peer
+      # (strict NAT, mobile data). Leave unset to run with STUN only, which
+      # is enough for two tabs on the same machine or the same network.
+      #
+      #   TURN_KEY_ID:    your relay provider key id
+      #   TURN_API_TOKEN: your relay provider api token
+      #
+      # These are read from the environment and never baked into the image.
+      TURN_KEY_ID: "${TURN_KEY_ID:-}"
+      TURN_API_TOKEN: "${TURN_API_TOKEN:-}"
+    restart: unless-stopped
