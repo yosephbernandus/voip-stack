@@ -192,7 +192,7 @@ SIP has two nested units of communication:
 - **Transaction**, A single request and all its responses. The INVITE→100→180→200 sequence is one transaction. The ACK is its own transaction (per RFC 3261's quirky rules).
 - **Dialog**, The complete conversation. From INVITE through BYE is one dialog. A dialog is identified by `Call-ID` + `From tag` + `To tag`.
 
-In our implementation, we don't need to build full dialog/transaction state machines, browsers do the heavy lifting. We just route messages based on headers.
+In this project we don't build full dialog or transaction state machines, since the browsers do that heavy lifting. The live server routes each message by its JSON `target` field, not by parsing SIP headers. The header machinery described here lives in the standalone `sip.py` parser, which the tests exercise.
 
 ### SIP Body and SDP
 

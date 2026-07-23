@@ -14,18 +14,22 @@ That negotiation *is* SDP. It's a small text format that describes the media cap
 
 ### Where It Fits
 
-SDP is never standalone. It rides inside other protocols, in our case, inside the body of SIP messages. When Alice sends an `INVITE`, her SDP offer is in the body. When Bob sends `200 OK`, his SDP answer is in the body.
+SDP is never standalone. It always rides inside another protocol's messages. In
+traditional SIP it is carried in the body of an INVITE and a 200 OK. In this
+project's live demo, the browser-generated SDP is carried inside the JSON invite
+and answer messages that travel over WebSocket. Either way it is a passenger,
+and the offer/answer flow is the same.
 
 ```
- SIP INVITE  -->  Content-Type: application/sdp
-                 |
-                 v
-                 [SDP offer]  <-- Alice says: "I support PCMU, PCMA, Opus"
+ Traditional SIP:
+   INVITE  -->  Content-Type: application/sdp
+                [SDP offer]   Alice: "I support PCMU, PCMA, Opus"
+   200 OK  -->  Content-Type: application/sdp
+                [SDP answer]  Bob:   "Let's use Opus"
 
- SIP 200 OK  -->  Content-Type: application/sdp
-                 |
-                 v
-                 [SDP answer] <-- Bob replies: "Let's use Opus"
+ This demo (JSON over WebSocket):
+   {"type": "invite", ..., "sdp": <SDP offer>}    Alice's offer
+   {"type": "answer", ..., "sdp": <SDP answer>}   Bob's answer
 ```
 
 This exchange is called the **offer/answer model** and is defined in RFC 3264.
