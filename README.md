@@ -90,6 +90,20 @@ pytest
 The suite covers round trips, hand-built byte vectors of the kind you would
 see for these protocols on the wire, malformed input, and boundary conditions.
 
+## Benchmark the learning modules
+
+The repository includes reproducible microbenchmarks for the standalone RTP
+parser and PCM mixer:
+
+```bash
+python -m bench.bench_rtp
+python -m bench.bench_audio
+```
+
+See [bench/README.md](bench/README.md) for the commands, verified local
+results, and limitations. These are learning-module microbenchmarks, not
+production call-capacity tests.
+
 ## How a call flows
 
 ```
