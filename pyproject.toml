@@ -18,6 +18,9 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+native = [
+    "maturin>=1.7,<2.0",
+]
 
 [tool.setuptools]
 packages = ["voip", "voip.types"]

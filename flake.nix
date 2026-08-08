@@ -22,6 +22,9 @@
             pythonPackages.websockets
             pythonPackages.pytest
             pythonPackages.pip
+            pkgs.cargo
+            pkgs.rustc
+            pkgs.maturin
           ];
 
           shellHook = ''
@@ -30,6 +33,8 @@
             echo ""
             echo "Commands:"
             echo "  pytest              run the test suite"
+            echo "  cd native/rtp_parser && maturin develop --release"
+            echo "                      build optional native RTP parser"
             echo "  python -m voip      start the signaling server on :8080"
 
             # Make the voip package importable from the project root.

@@ -1,0 +1,16 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "voip-rtp-native"
+version = "0.1.0"
+description = "Optional PyO3 RTP parser experiment for voip-stack"
+requires-python = ">=3.12"
+readme = "README.md"
+license = { text = "MIT" }
+
+[tool.maturin]
+python-source = "python"
+module-name = "voip_rtp_native._native"
+features = ["extension-module"]

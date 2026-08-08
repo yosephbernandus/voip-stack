@@ -33,3 +33,35 @@ Python 3.14.5 on an Apple Silicon Mac:
 
 Treat these as one local baseline, not a promise about another machine and not
 an estimate of concurrent calls.
+
+## Optional native RTP comparison
+
+After building the release extension, compare the Python reference parser,
+the raw PyO3 result, and the native parser converted back to the same Pydantic
+model:
+
+```bash
+cd native/rtp_parser
+maturin develop --release
+cd ../..
+python -m bench.bench_rtp_native --packets 100000 --iterations 5
+```
+
+The following release-build result was measured on 8 August 2026 using Python
+3.14.5, Rust 1.94.1, and Maturin 1.14.1 on the same Apple Silicon Mac:
+
+| Parser path | Median result | Relative to Python |
+| --- | ---: | ---: |
+| Python parser + Pydantic model | 411,987 packets/second | 1.00x |
+| Rust parser + lightweight PyO3 object | 10,891,515 packets/second | 26.44x |
+| Rust parser + Pydantic adapter | 405,713 packets/second | 0.98x |
+
+The raw native path returns a lighter object, so its result is not an equal-
+work replacement for the Pydantic path. The adapter result is the relevant
+comparison when callers still require the existing `RtpPacket` model. In this
+run, model construction erased the parser-only advantage.
+
+See [docs/native-rtp-parser.md](../docs/native-rtp-parser.md) for supported
+fields and interpretation. The comparison remains parser-only. Faster parsing
+does not remove packetization delay, network delay, TURN relay delay, jitter
+buffering, codec work, encryption, or playback delay.

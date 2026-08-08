@@ -5,6 +5,10 @@ __pycache__/
 .pytest_cache/
 build/
 dist/
+target/
+*.so
+*.dylib
+*.pyd
 
 # Virtual environments
 .venv/

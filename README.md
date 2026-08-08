@@ -104,6 +104,26 @@ See [bench/README.md](bench/README.md) for the commands, verified local
 results, and limitations. These are learning-module microbenchmarks, not
 production call-capacity tests.
 
+### Optional native RTP parser
+
+`native/rtp_parser` contains a separate PyO3 and Maturin experiment for the RTP
+parser. It leaves the Python implementation unchanged, then checks both
+implementations against the same packet vectors before comparing their
+standalone throughput.
+
+```bash
+pip install -e ".[dev,native]"
+cd native/rtp_parser
+maturin develop --release
+cd ../..
+pytest tests/test_rtp_native.py
+python -m bench.bench_rtp_native
+```
+
+The native parser is not part of the signaling server or browser call. Its
+benchmark measures parser CPU work, not network latency or call capacity. See
+[docs/native-rtp-parser.md](docs/native-rtp-parser.md) for the exact boundary.
+
 ## How a call flows
 
 ```
@@ -142,6 +162,7 @@ client/          browser client (WebRTC and UI)
 tests/           one test module per protocol layer
 docs/            protocol guides for each layer
 deploy/          example Kubernetes manifest
+native/          optional native experiments; not used by the live call
 ```
 
 ## Protocol guides

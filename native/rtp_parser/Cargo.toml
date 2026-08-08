@@ -1,0 +1,17 @@
+[package]
+name = "voip-rtp-native"
+version = "0.1.0"
+edition = "2024"
+description = "Optional native RTP parser experiment for voip-stack"
+license = "MIT"
+
+[lib]
+name = "_native"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+pyo3 = "0.28.3"
